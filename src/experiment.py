@@ -309,30 +309,62 @@ def run_multiple_experiments_generalization(
             epochs=selector_epochs,
         )
 
+        # ---------------------------------------------------
+        # 3) Supervised CAE: full 20-class classification
+        # ---------------------------------------------------
+        data_full = {
+            "x_train": combined["x_train"],
+            "x_val": combined["x_val"],
+            "x_test": combined["x_test"],
+            "y_train": combined["y_train_full"],
+            "y_val": combined["y_val_full"],
+            "y_test": combined["y_test_full"],
+            "y_train_oh": combined["y_train_full_oh"],
+            "y_val_oh": combined["y_val_full_oh"],
+            "input_dim": combined["input_dim"],
+            "num_classes": 20,
+        }
+
+        full_idx = select_features_supervised(
+            data=data_full,
+            k=k,
+            seed=seed,
+            epochs=selector_epochs,
+        )
 
         feature_sets = {
             "unsupervised": unsup_idx,
-            "supervised": domain_idx,
+            "supervised_domain_2class": domain_idx,
+            "supervised_full_20class": full_idx,
         }
 
         # ---------------------------------------------------
-        # Transfer evaluation:
-        # use selected features to classify all 20 classes
+        # Transfer evaluation
         # ---------------------------------------------------
         for feature_source, indices in feature_sets.items():
             x_train_sel = combined["x_train"][:, indices]
             x_test_sel = combined["x_test"][:, indices]
 
-            row = {
+            # A) Evaluate selected features on 20-class task
+            row_20 = {
                 "experiment": "generalization_mnist_fashion",
                 "feature_source": feature_source,
+                "selection_task": (
+                    "unsupervised"
+                    if feature_source == "unsupervised"
+                    else (
+                        "domain_2class"
+                        if feature_source == "supervised_domain_2class"
+                        else "full_20class"
+                    )
+                ),
+                "evaluation_task": "full_20class",
                 "seed": seed,
                 "k": k,
                 "indices": list(map(int, indices)),
             }
 
-            # Main downstream task: 20-class classification
-            row.update(
+            row_20.update(
                 evaluate_logistic_classification(
                     x_train_sel=x_train_sel,
                     x_test_sel=x_test_sel,
@@ -341,21 +373,67 @@ def run_multiple_experiments_generalization(
                 )
             )
 
-            all_rows.append(row)
+            all_rows.append(row_20)
+
+            # B) Evaluate selected features on 2-class domain task
+            row_2 = {
+                "experiment": "generalization_mnist_fashion",
+                "feature_source": feature_source,
+                "selection_task": (
+                    "unsupervised"
+                    if feature_source == "unsupervised"
+                    else (
+                        "domain_2class"
+                        if feature_source == "supervised_domain_2class"
+                        else "full_20class"
+                    )
+                ),
+                "evaluation_task": "domain_2class",
+                "seed": seed,
+                "k": k,
+                "indices": list(map(int, indices)),
+            }
+
+            row_2.update(
+                evaluate_logistic_classification(
+                    x_train_sel=x_train_sel,
+                    x_test_sel=x_test_sel,
+                    y_train=combined["y_train_domain"],
+                    y_test=combined["y_test_domain"],
+                )
+            )
+
+            all_rows.append(row_2)
 
         with open(os.path.join(output_dir, "raw_generalization_results.json"), "w") as f:
             json.dump(all_rows, f, indent=2)
 
     df = pd.DataFrame(all_rows)
 
+
+
     metric_cols = [
         col for col in df.columns
-        if col not in ["experiment", "feature_source", "seed", "k", "indices"]
+        if col not in [
+            "experiment",
+            "feature_source",
+            "selection_task",
+            "evaluation_task",
+            "seed",
+            "k",
+            "indices",
+        ]
     ]
 
     summary = (
         df
-        .groupby(["experiment", "feature_source", "k"])[metric_cols]
+        .groupby([
+            "experiment",
+            "feature_source",
+            "selection_task",
+            "evaluation_task",
+            "k",
+        ])[metric_cols]
         .agg(["mean", "std"])
         .reset_index()
     )
@@ -422,16 +500,6 @@ if __name__ == "__main__":
     summary = df_domain.groupby("feature_source").agg(["mean", "std"])
     print(summary)
 
-
-
-
-
-
-
-
-
-
-
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
@@ -457,7 +525,7 @@ if __name__ == "__main__":
         seeds = (0,)
         selector_epochs = 50
     else:
-        seeds = (0, 1, 2, 3, 4)
+        seeds = (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19)
         selector_epochs = 200
 
     # ------------------------
